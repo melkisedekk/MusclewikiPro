@@ -36,7 +36,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
         private string feedbackMessage = "Hazýrlan...";
 
-        // Bu deðiþken artýk sadece "Puanlamayý" baþlatmak için var. Ýskelet hep görünecek.
         private bool isGameStarted = false;
 
         private long stateStableTimer = 0;
@@ -89,7 +88,7 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
         private IEnumerator CountdownRoutine()
         {
-            isGameStarted = false; // Puanlamayý durdur
+            isGameStarted = false;
             if (countdownText != null)
             {
                 countdownText.gameObject.SetActive(true);
@@ -99,36 +98,18 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                 countdownText.text = "BAÞLA!"; yield return new WaitForSeconds(0.5f);
                 countdownText.gameObject.SetActive(false);
             }
-            isGameStarted = true; // Puanlamayý baþlat
+            isGameStarted = true;
         }
 
         private void Update()
         {
-            // Ýskelet rengini her zaman güncelle (Geri sayýmda bile)
+            if (!isGameStarted) return;
+
             UpdateSkeletonColor(currentPoseState);
 
             if (triggerSquatSound) { PlaySound(repSound); triggerSquatSound = false; }
             if (triggerFinishExercise) { FinishExercise(); triggerFinishExercise = false; }
 
-            // UI Güncelleme
-            if (scoreText != null)
-            {
-                if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Squat)
-                {
-                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\nSQUAT: {squatCount} / {squatTargetCount}\n{feedbackMessage}";
-                }
-                else
-                {
-                    string exName = (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank) ? "YAN PLANK" : "PLANK";
-                    string color = isPlankCorrect ? "green" : "red";
-                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\n{exName}: {plankTimer:F1} / {plankTargetTime}\n<color={color}>{feedbackMessage}</color>";
-                }
-            }
-
-            // Geri sayým bitmediyse aþaðýdaki oyun mantýklarýný (süre sayma vb.) çalýþtýrma
-            if (!isGameStarted) return;
-
-            // --- PLANK/SIDE PLANK SÜRE MANTIÐI ---
             if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Plank ||
                 ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank)
             {
@@ -153,6 +134,20 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                         isPlankCorrect = false;
                         triggerFinishExercise = true;
                     }
+                }
+            }
+
+            if (scoreText != null)
+            {
+                if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Squat)
+                {
+                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\nSQUAT: {squatCount} / {squatTargetCount}\n{feedbackMessage}";
+                }
+                else
+                {
+                    string exName = (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank) ? "YAN PLANK" : "PLANK";
+                    string color = isPlankCorrect ? "green" : "red";
+                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\n{exName}: {plankTimer:F1} / {plankTargetTime}\n<color={color}>{feedbackMessage}</color>";
                 }
             }
 
@@ -185,7 +180,15 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
             if (imageSource is WebCamSource webCamSource)
             {
                 WebCamDevice[] devices = WebCamTexture.devices;
-                for (int i = 0; i < devices.Length; i++) { if (!devices[i].isFrontFacing) { webCamSource.SelectSource(i); break; } }
+                for (int i = 0; i < devices.Length; i++)
+                {
+                    // --- DEÐÝÞÝKLÝK BURADA: isFrontFacing (ÖN KAMERA) ---
+                    if (devices[i].isFrontFacing)
+                    {
+                        webCamSource.SelectSource(i);
+                        break;
+                    }
+                }
             }
             yield return imageSource.Play();
 
@@ -199,7 +202,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
             if (countdownText != null) countdownText.text = "";
             yield return StartCoroutine(CountdownRoutine());
 
-            // Görüntü iþleme seçenekleri
             var transformationOptions = imageSource.GetTransformationOptions();
             var flipHorizontally = transformationOptions.flipHorizontally;
             var flipVertically = transformationOptions.flipVertically;
@@ -215,7 +217,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                 if (isPaused) yield return new WaitWhile(() => isPaused);
                 if (!_textureFramePool.TryGetTextureFrame(out var textureFrame)) { yield return new WaitForEndOfFrame(); continue; }
 
-                // --- ÝÞTE DÜZELTÝLEN KISIM (IMAGE OKUMA) ---
                 MPImage image;
                 switch (config.ImageReadMode)
                 {
@@ -227,13 +228,12 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                         break;
                     case ImageReadMode.CPU:
                         yield return waitForEndOfFrame;
-                        // BU SATIRI UNUTMUÞTUK, O YÜZDEN OKUMUYORDU:
+                        // CPU Modu - Köprü Saðlam
                         textureFrame.ReadTextureOnCPU(imageSource.GetCurrentTexture(), flipHorizontally, flipVertically);
                         image = textureFrame.BuildCPUImage();
                         textureFrame.Release();
                         break;
                     default:
-                        // Asenkron okuma
                         req = textureFrame.ReadTextureAsync(imageSource.GetCurrentTexture(), flipHorizontally, flipVertically);
                         yield return waitUntilReqDone;
                         if (req.hasError) { continue; }
@@ -241,7 +241,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                         textureFrame.Release();
                         break;
                 }
-                // -------------------------------------------
 
                 taskApi.DetectAsync(image, GetCurrentTimestampMillisec(), new Tasks.Vision.Core.ImageProcessingOptions(rotationDegrees: 0));
                 yield return waitForEndOfFrame;
@@ -250,7 +249,8 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
         private void OnPoseLandmarkDetectionOutput(PoseLandmarkerResult result, MPImage image, long timestamp)
         {
-            // Ýskelet her zaman çizilsin (Geri sayým sýrasýnda bile)
+            if (!isGameStarted) return;
+
             if (result.poseLandmarks != null && result.poseLandmarks.Count > 0)
             {
                 var landmarks = result.poseLandmarks[0].landmarks;
@@ -265,13 +265,32 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
             DisposeAllMasks(result);
         }
 
+        private void RunSidePlankLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
+        {
+            var lShoulder = landmarks[11]; var lElbow = landmarks[13]; var lHip = landmarks[23]; var lAnkle = landmarks[27];
+            var rShoulder = landmarks[12]; var rElbow = landmarks[14]; var rHip = landmarks[24]; var rAnkle = landmarks[28];
+            bool isLeftDown = lElbow.y > rElbow.y;
+            var shoulder = isLeftDown ? lShoulder : rShoulder;
+            var elbow = isLeftDown ? lElbow : rElbow;
+            var hip = isLeftDown ? lHip : rHip;
+            var ankle = isLeftDown ? lAnkle : rAnkle;
+
+            float bodyAngle = CalculateAngle(shoulder, hip, ankle);
+            bool isBodyStraight = bodyAngle > 160 && bodyAngle < 200;
+            float xDiff = Math.Abs(shoulder.x - elbow.x);
+            bool isArmVertical = xDiff < 0.15f;
+
+            if (isBodyStraight && isArmVertical) { isPlankCorrect = true; feedbackMessage = "HARÝKA! KALÇANI TUT"; }
+            else { isPlankCorrect = false; if (!isArmVertical) feedbackMessage = "DÝRSEÐÝNÝ OMZUNUN ALTINA ÇEK"; else if (bodyAngle < 160) feedbackMessage = "KALÇANI YUKARI ÝT!"; else feedbackMessage = "VÜCUDUNU DÜZ TUT"; }
+            currentPoseState = isPlankCorrect;
+        }
+
         private void RunSquatLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
         {
             var hip = landmarks[23]; var knee = landmarks[25]; var ankle = landmarks[27];
             float angle = CalculateAngle(hip, knee, ankle);
             currentPoseState = angle < 150;
 
-            // Eðer oyun baþlamadýysa (Geri sayým varsa) hesaplama yapma, sadece renk göster
             if (!isGameStarted) return;
 
             if (angle < 90) { if (!isSquatting) { if (stateStableTimer == 0) stateStableTimer = timestamp; if (timestamp - stateStableTimer > STABILITY_DELAY) { isSquatting = true; stateStableTimer = 0; feedbackMessage = "KALK!"; } } else stateStableTimer = 0; }
@@ -307,26 +326,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
             if (isBodyStraight && isHorizontal && isArmVertical) { isPlankCorrect = true; feedbackMessage = "MÜKEMMEL! BOZMA"; }
             else { isPlankCorrect = false; if (!isHorizontal) feedbackMessage = "YERE YATAY OL!"; else if (!isArmVertical) feedbackMessage = "DÝRSEKLERÝNÝ DÜZELT!"; else if (bodyAngle < 165) feedbackMessage = "KALÇANI KALDIR!"; else feedbackMessage = "KALÇANI ÝNDÝR!"; }
-            currentPoseState = isPlankCorrect;
-        }
-
-        private void RunSidePlankLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
-        {
-            var lShoulder = landmarks[11]; var lElbow = landmarks[13]; var lHip = landmarks[23]; var lAnkle = landmarks[27];
-            var rShoulder = landmarks[12]; var rElbow = landmarks[14]; var rHip = landmarks[24]; var rAnkle = landmarks[28];
-            bool isLeftDown = lElbow.y > rElbow.y;
-            var shoulder = isLeftDown ? lShoulder : rShoulder;
-            var elbow = isLeftDown ? lElbow : rElbow;
-            var hip = isLeftDown ? lHip : rHip;
-            var ankle = isLeftDown ? lAnkle : rAnkle;
-
-            float bodyAngle = CalculateAngle(shoulder, hip, ankle);
-            bool isBodyStraight = bodyAngle > 160 && bodyAngle < 200;
-            float xDiff = Math.Abs(shoulder.x - elbow.x);
-            bool isArmVertical = xDiff < 0.15f;
-
-            if (isBodyStraight && isArmVertical) { isPlankCorrect = true; feedbackMessage = "HARÝKA! KALÇANI TUT"; }
-            else { isPlankCorrect = false; if (!isArmVertical) feedbackMessage = "DÝRSEÐÝNÝ OMZUNUN ALTINA ÇEK"; else if (bodyAngle < 160) feedbackMessage = "KALÇANI YUKARI ÝT!"; else feedbackMessage = "VÜCUDUNU DÜZ TUT"; }
             currentPoseState = isPlankCorrect;
         }
 
