@@ -36,7 +36,7 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
         private string feedbackMessage = "Hazýrlan...";
 
-        // Bu deðiþkeni artýk sadece analiz kontrolü için kullanacaðýz
+        // Bu deðiþken artýk sadece "Puanlamayý" baþlatmak için var. Ýskelet hep görünecek.
         private bool isGameStarted = false;
 
         private long stateStableTimer = 0;
@@ -87,12 +87,9 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
             }
         }
 
-        // DÝKKAT: Start() fonksiyonunu tamamen sildik! 
-        // Böylece Base Class'ýn (VisionTaskApiRunner) Start'ý çalýþacak ve kamerayý açacak.
-
         private IEnumerator CountdownRoutine()
         {
-            isGameStarted = false;
+            isGameStarted = false; // Puanlamayý durdur
             if (countdownText != null)
             {
                 countdownText.gameObject.SetActive(true);
@@ -102,20 +99,36 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                 countdownText.text = "BAÞLA!"; yield return new WaitForSeconds(0.5f);
                 countdownText.gameObject.SetActive(false);
             }
-            isGameStarted = true;
+            isGameStarted = true; // Puanlamayý baþlat
         }
 
         private void Update()
         {
-            // Oyun baþlamadýysa (Geri sayým bitmediyse) Update çalýþmasýn
-            if (!isGameStarted) return;
-
+            // Ýskelet rengini her zaman güncelle (Geri sayýmda bile)
             UpdateSkeletonColor(currentPoseState);
 
             if (triggerSquatSound) { PlaySound(repSound); triggerSquatSound = false; }
             if (triggerFinishExercise) { FinishExercise(); triggerFinishExercise = false; }
 
-            // --- YAN PLANK VE NORMAL PLANK AYRIMI ---
+            // UI Güncelleme
+            if (scoreText != null)
+            {
+                if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Squat)
+                {
+                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\nSQUAT: {squatCount} / {squatTargetCount}\n{feedbackMessage}";
+                }
+                else
+                {
+                    string exName = (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank) ? "YAN PLANK" : "PLANK";
+                    string color = isPlankCorrect ? "green" : "red";
+                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\n{exName}: {plankTimer:F1} / {plankTargetTime}\n<color={color}>{feedbackMessage}</color>";
+                }
+            }
+
+            // Geri sayým bitmediyse aþaðýdaki oyun mantýklarýný (süre sayma vb.) çalýþtýrma
+            if (!isGameStarted) return;
+
+            // --- PLANK/SIDE PLANK SÜRE MANTIÐI ---
             if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Plank ||
                 ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank)
             {
@@ -143,21 +156,6 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
                 }
             }
 
-            // --- UI ---
-            if (scoreText != null)
-            {
-                if (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.Squat)
-                {
-                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\nSQUAT: {squatCount} / {squatTargetCount}\n{feedbackMessage}";
-                }
-                else
-                {
-                    string exName = (ExerciseManager.currentExercise == ExerciseManager.ExerciseType.SidePlank) ? "YAN PLANK" : "PLANK";
-                    string color = isPlankCorrect ? "green" : "red";
-                    scoreText.text = $"SET: {currentSetNumber} / {targetSetCount}\n{exName}: {plankTimer:F1} / {plankTargetTime}\n<color={color}>{feedbackMessage}</color>";
-                }
-            }
-
             if (Input.GetKeyDown(KeyCode.F)) triggerFinishExercise = true;
             if (Input.GetKey(KeyCode.Space)) currentPoseState = true;
         }
@@ -177,52 +175,74 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
         public void ReturnToHome() { ExerciseManager.returningFromGame = false; SceneManager.LoadScene("MenuScene"); }
         public override void Stop() { base.Stop(); _textureFramePool?.Dispose(); _textureFramePool = null; }
 
-        // --- ASIL SÝHÝR BURADA: RUN FONKSÝYONU ---
         protected override IEnumerator Run()
         {
-            // 1. MediaPipe Hazýrlýklarý
             yield return AssetLoader.PrepareAssetAsync(config.ModelPath);
             var options = config.GetPoseLandmarkerOptions(config.RunningMode == Tasks.Vision.Core.RunningMode.LIVE_STREAM ? OnPoseLandmarkDetectionOutput : null);
             taskApi = PoseLandmarker.CreateFromOptions(options, GpuManager.GpuResources);
 
-            // 2. Kamerayý Hazýrla ve AÇ
             var imageSource = ImageSourceProvider.ImageSource;
             if (imageSource is WebCamSource webCamSource)
             {
                 WebCamDevice[] devices = WebCamTexture.devices;
                 for (int i = 0; i < devices.Length; i++) { if (!devices[i].isFrontFacing) { webCamSource.SelectSource(i); break; } }
             }
-            yield return imageSource.Play(); // <-- KAMERA BURADA AÇILIYOR
+            yield return imageSource.Play();
 
             if (!imageSource.isPrepared) yield break;
 
-            // 3. Ekran ve Texture Ayarlarý
             _textureFramePool = new Experimental.TextureFramePool(imageSource.textureWidth, imageSource.textureHeight, TextureFormat.RGBA32, 10);
             screen.Initialize(imageSource);
             SetupAnnotationController(_poseLandmarkerResultAnnotationController, imageSource);
             _poseLandmarkerResultAnnotationController.InitScreen(imageSource.textureWidth, imageSource.textureHeight);
 
-            // --- DÜZELTME: GERÝ SAYIMI BURAYA ALDIK ---
-            // Kamera açýldý, kullanýcý kendini görüyor. Þimdi 3-2-1 sayabiliriz.
             if (countdownText != null) countdownText.text = "";
             yield return StartCoroutine(CountdownRoutine());
-            // ------------------------------------------
+
+            // Görüntü iþleme seçenekleri
+            var transformationOptions = imageSource.GetTransformationOptions();
+            var flipHorizontally = transformationOptions.flipHorizontally;
+            var flipVertically = transformationOptions.flipVertically;
 
             AsyncGPUReadbackRequest req = default;
             var waitUntilReqDone = new WaitUntil(() => req.done);
             var waitForEndOfFrame = new WaitForEndOfFrame();
+            var canUseGpuImage = SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3 && GpuManager.GpuResources != null;
+            using var glContext = canUseGpuImage ? GpuManager.GetGlContext() : null;
 
-            // 4. Analiz Döngüsü (Sonsuz Döngü)
             while (true)
             {
                 if (isPaused) yield return new WaitWhile(() => isPaused);
                 if (!_textureFramePool.TryGetTextureFrame(out var textureFrame)) { yield return new WaitForEndOfFrame(); continue; }
 
-                // CPU Modunda Görüntüyü Al
-                MPImage image = textureFrame.BuildCPUImage();
-                textureFrame.Release();
+                // --- ÝÞTE DÜZELTÝLEN KISIM (IMAGE OKUMA) ---
+                MPImage image;
+                switch (config.ImageReadMode)
+                {
+                    case ImageReadMode.GPU:
+                        if (!canUseGpuImage) throw new System.Exception("GPU mode not supported");
+                        textureFrame.ReadTextureOnGPU(imageSource.GetCurrentTexture(), flipHorizontally, flipVertically);
+                        image = textureFrame.BuildGPUImage(glContext);
+                        yield return waitForEndOfFrame;
+                        break;
+                    case ImageReadMode.CPU:
+                        yield return waitForEndOfFrame;
+                        // BU SATIRI UNUTMUÞTUK, O YÜZDEN OKUMUYORDU:
+                        textureFrame.ReadTextureOnCPU(imageSource.GetCurrentTexture(), flipHorizontally, flipVertically);
+                        image = textureFrame.BuildCPUImage();
+                        textureFrame.Release();
+                        break;
+                    default:
+                        // Asenkron okuma
+                        req = textureFrame.ReadTextureAsync(imageSource.GetCurrentTexture(), flipHorizontally, flipVertically);
+                        yield return waitUntilReqDone;
+                        if (req.hasError) { continue; }
+                        image = textureFrame.BuildCPUImage();
+                        textureFrame.Release();
+                        break;
+                }
+                // -------------------------------------------
 
-                // Analiz Et
                 taskApi.DetectAsync(image, GetCurrentTimestampMillisec(), new Tasks.Vision.Core.ImageProcessingOptions(rotationDegrees: 0));
                 yield return waitForEndOfFrame;
             }
@@ -230,9 +250,7 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
         private void OnPoseLandmarkDetectionOutput(PoseLandmarkerResult result, MPImage image, long timestamp)
         {
-            // Oyun baþlamadýysa (Geri sayým sürüyorsa) analiz sonuçlarýný iþleme
-            if (!isGameStarted) return;
-
+            // Ýskelet her zaman çizilsin (Geri sayým sýrasýnda bile)
             if (result.poseLandmarks != null && result.poseLandmarks.Count > 0)
             {
                 var landmarks = result.poseLandmarks[0].landmarks;
@@ -247,45 +265,14 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
             DisposeAllMasks(result);
         }
 
-        private void RunSidePlankLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
-        {
-            var lShoulder = landmarks[11]; var lElbow = landmarks[13]; var lHip = landmarks[23]; var lAnkle = landmarks[27];
-            var rShoulder = landmarks[12]; var rElbow = landmarks[14]; var rHip = landmarks[24]; var rAnkle = landmarks[28];
-
-            bool isLeftDown = lElbow.y > rElbow.y;
-
-            var shoulder = isLeftDown ? lShoulder : rShoulder;
-            var elbow = isLeftDown ? lElbow : rElbow;
-            var hip = isLeftDown ? lHip : rHip;
-            var ankle = isLeftDown ? lAnkle : rAnkle;
-
-            float bodyAngle = CalculateAngle(shoulder, hip, ankle);
-            bool isBodyStraight = bodyAngle > 160 && bodyAngle < 200;
-
-            float xDiff = Math.Abs(shoulder.x - elbow.x);
-            bool isArmVertical = xDiff < 0.15f;
-
-            if (isBodyStraight && isArmVertical)
-            {
-                isPlankCorrect = true;
-                feedbackMessage = "HARÝKA! KALÇANI TUT";
-            }
-            else
-            {
-                isPlankCorrect = false;
-                if (!isArmVertical) feedbackMessage = "DÝRSEÐÝNÝ OMZUNUN ALTINA ÇEK";
-                else if (bodyAngle < 160) feedbackMessage = "KALÇANI YUKARI ÝT!";
-                else feedbackMessage = "VÜCUDUNU DÜZ TUT";
-            }
-            currentPoseState = isPlankCorrect;
-        }
-
-        // Logicler ve Yardýmcýlar
         private void RunSquatLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
         {
             var hip = landmarks[23]; var knee = landmarks[25]; var ankle = landmarks[27];
             float angle = CalculateAngle(hip, knee, ankle);
             currentPoseState = angle < 150;
+
+            // Eðer oyun baþlamadýysa (Geri sayým varsa) hesaplama yapma, sadece renk göster
+            if (!isGameStarted) return;
 
             if (angle < 90) { if (!isSquatting) { if (stateStableTimer == 0) stateStableTimer = timestamp; if (timestamp - stateStableTimer > STABILITY_DELAY) { isSquatting = true; stateStableTimer = 0; feedbackMessage = "KALK!"; } } else stateStableTimer = 0; }
             else if (angle > 160)
@@ -320,6 +307,26 @@ namespace Mediapipe.Unity.Sample.PoseLandmarkDetection
 
             if (isBodyStraight && isHorizontal && isArmVertical) { isPlankCorrect = true; feedbackMessage = "MÜKEMMEL! BOZMA"; }
             else { isPlankCorrect = false; if (!isHorizontal) feedbackMessage = "YERE YATAY OL!"; else if (!isArmVertical) feedbackMessage = "DÝRSEKLERÝNÝ DÜZELT!"; else if (bodyAngle < 165) feedbackMessage = "KALÇANI KALDIR!"; else feedbackMessage = "KALÇANI ÝNDÝR!"; }
+            currentPoseState = isPlankCorrect;
+        }
+
+        private void RunSidePlankLogic(List<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> landmarks, long timestamp)
+        {
+            var lShoulder = landmarks[11]; var lElbow = landmarks[13]; var lHip = landmarks[23]; var lAnkle = landmarks[27];
+            var rShoulder = landmarks[12]; var rElbow = landmarks[14]; var rHip = landmarks[24]; var rAnkle = landmarks[28];
+            bool isLeftDown = lElbow.y > rElbow.y;
+            var shoulder = isLeftDown ? lShoulder : rShoulder;
+            var elbow = isLeftDown ? lElbow : rElbow;
+            var hip = isLeftDown ? lHip : rHip;
+            var ankle = isLeftDown ? lAnkle : rAnkle;
+
+            float bodyAngle = CalculateAngle(shoulder, hip, ankle);
+            bool isBodyStraight = bodyAngle > 160 && bodyAngle < 200;
+            float xDiff = Math.Abs(shoulder.x - elbow.x);
+            bool isArmVertical = xDiff < 0.15f;
+
+            if (isBodyStraight && isArmVertical) { isPlankCorrect = true; feedbackMessage = "HARÝKA! KALÇANI TUT"; }
+            else { isPlankCorrect = false; if (!isArmVertical) feedbackMessage = "DÝRSEÐÝNÝ OMZUNUN ALTINA ÇEK"; else if (bodyAngle < 160) feedbackMessage = "KALÇANI YUKARI ÝT!"; else feedbackMessage = "VÜCUDUNU DÜZ TUT"; }
             currentPoseState = isPlankCorrect;
         }
 

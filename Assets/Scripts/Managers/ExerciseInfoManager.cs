@@ -15,7 +15,7 @@ public class ExerciseInfoManager : MonoBehaviour
         public VideoClip demoClip1;
         public VideoClip demoClip2;
         [TextArea(5, 15)] public string instructions;
-        public string sceneToLoadName; // BURASI ÇOK ÖNEMLÝ
+        public string sceneToLoadName;
     }
 
     [Header("Egzersiz Verileri")]
@@ -48,8 +48,7 @@ public class ExerciseInfoManager : MonoBehaviour
 
     void Start()
     {
-        if (infoPanel != null) infoPanel.SetActive(false);
-
+        // Temel Buton Baðlantýlarý
         if (startButton) startButton.onClick.AddListener(LoadSelectedScene);
         if (backButton) backButton.onClick.AddListener(CloseInfoPanel);
         if (homeButton) homeButton.onClick.AddListener(GoToMainMenu);
@@ -58,6 +57,39 @@ public class ExerciseInfoManager : MonoBehaviour
         if (setPlusBtn) setPlusBtn.onClick.AddListener(() => ChangeSet(1));
         if (repMinusBtn) repMinusBtn.onClick.AddListener(() => ChangeRep(-1));
         if (repPlusBtn) repPlusBtn.onClick.AddListener(() => ChangeRep(1));
+
+        // --- DÜZELTME: OYUNDAN DÖNÜÞ KONTROLÜ ---
+        if (ExerciseManager.returningFromGame)
+        {
+            // Bayraðý indir (ki bir daha açýlýþta çalýþmasýn)
+            ExerciseManager.returningFromGame = false;
+
+            // Hangi egzersizden döndüysek onun ID'sini bul
+            string idToOpen = "";
+            switch (ExerciseManager.currentExercise)
+            {
+                case ExerciseManager.ExerciseType.Squat: idToOpen = "squat"; break;
+                case ExerciseManager.ExerciseType.Plank: idToOpen = "plank"; break;
+                case ExerciseManager.ExerciseType.SidePlank: idToOpen = "sideplank"; break;
+            }
+
+            // Paneli aç
+            if (idToOpen != "")
+            {
+                OpenInfoPanel(idToOpen);
+
+                // --- ÝNCE AYAR: Kullanýcýnýn son seçtiði sayýlarý geri yükle ---
+                // OpenInfoPanel varsayýlanlarý yükler, biz burada onlarý eziyoruz.
+                if (ExerciseManager.userTargetSets > 0) currentSets = ExerciseManager.userTargetSets;
+                if (ExerciseManager.userTargetReps > 0) currentReps = ExerciseManager.userTargetReps;
+                UpdateSettingsUI();
+            }
+        }
+        else
+        {
+            // Oyundan dönmüyorsak paneli gizli baþlat (Normal açýlýþ)
+            if (infoPanel != null) infoPanel.SetActive(false);
+        }
     }
 
     public void OpenInfoPanel(string exerciseID)
@@ -78,10 +110,10 @@ public class ExerciseInfoManager : MonoBehaviour
             currentSceneToLoad = data.sceneToLoadName;
             currentExerciseID = data.exerciseID;
 
-            // --- VARSAYILAN DEÐERLER ---
+            // Varsayýlan Deðerler (Ýlk kez açýlýyorsa)
             if (currentExerciseID == "squat") { currentSets = 3; currentReps = 12; }
             else if (currentExerciseID == "plank") { currentSets = 3; currentReps = 30; }
-            else if (currentExerciseID == "sideplank") { currentSets = 3; currentReps = 20; } // YENÝ
+            else if (currentExerciseID == "sideplank") { currentSets = 3; currentReps = 20; }
 
             UpdateSettingsUI();
             infoPanel.SetActive(true);
@@ -136,7 +168,7 @@ public class ExerciseInfoManager : MonoBehaviour
         {
             if (currentExerciseID == "squat") ExerciseManager.currentExercise = ExerciseManager.ExerciseType.Squat;
             else if (currentExerciseID == "plank") ExerciseManager.currentExercise = ExerciseManager.ExerciseType.Plank;
-            else if (currentExerciseID == "sideplank") ExerciseManager.currentExercise = ExerciseManager.ExerciseType.SidePlank; // YENÝ
+            else if (currentExerciseID == "sideplank") ExerciseManager.currentExercise = ExerciseManager.ExerciseType.SidePlank;
 
             SceneManager.LoadScene(currentSceneToLoad);
         }
